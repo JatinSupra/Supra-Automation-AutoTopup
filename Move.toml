@@ -4,7 +4,7 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-your_address = "YOUR_CLI_ACCOUNT_ADDRESS"
+your_address = "0x1c5acf62be507c27a7788a661b546224d806246765ff2695efece60194c6df05"
 
 [dev-addresses]
 

@@ -1,207 +1,190 @@
-module your_address::autotopup {
+module your_address::autofinal {
     use supra_framework::coin;
     use supra_framework::supra_coin::SupraCoin;
     use supra_framework::event;
+    use supra_framework::timestamp;
     use std::signer;
+    use std::error;
+
+    /// Module state - similar to Counter in your example
+    struct TopUpManager has key {
+        total_topups: u64,
+        last_topup_time: u64,
+        threshold: u64,
+        topup_amount: u64,
+        initialized: bool,
+    }
 
     /// Error codes
-    const E_INSUFFICIENT_BALANCE: u64 = 1;
-    const E_TARGET_NOT_REGISTERED: u64 = 2;
+    const E_NOT_INITIALIZED: u64 = 1;
+    const E_ALREADY_INITIALIZED: u64 = 2;
+    const E_INSUFFICIENT_BALANCE: u64 = 3;
 
     /// Event emitted when a top-up occurs
     #[event]
-    struct HighThresholdTopUpEvent has drop, store {
+    struct AutoTopUpEvent has drop, store {
         deployer: address,
         target: address,
-        amount_transferred: u64,
+        amount: u64,
         target_balance_before: u64,
         target_balance_after: u64,
-        threshold_used: u64,
-        deployer_balance_after: u64,
+        execution_count: u64,
+        timestamp: u64,
     }
 
-    /// Main automation function: Tops up 50 SUPRA when target drops below 600 SUPRA
-    /// This function will be called by Supra's automation system
-    public entry fun high_threshold_topup(
+    /// Event emitted every time automation runs (even if no transfer)
+    #[event]
+    struct AutomationExecutedEvent has drop, store {
+        deployer: address,
+        target: address,
+        action_taken: vector<u8>,
+        target_balance: u64,
+        execution_count: u64,
+        timestamp: u64,
+    }
+
+    /// Initialize module state when deployed - similar to your Counter example
+    fun init_module(account: &signer) {
+        let account_addr = signer::address_of(account);
+        
+        // Ensure not already initialized
+        assert!(!exists<TopUpManager>(account_addr), error::already_exists(E_ALREADY_INITIALIZED));
+        
+        let current_time = timestamp::now_seconds();
+        
+        // Create the TopUpManager resource
+        move_to(account, TopUpManager {
+            total_topups: 0,
+            last_topup_time: current_time,
+            threshold: 600_000_000, // 600 SUPRA
+            topup_amount: 50_000_000, // 50 SUPRA
+            initialized: true,
+        });
+    }
+
+    /// Main automation function that requires initialized state
+    public entry fun auto_topup_with_state(
         deployer: &signer,
         target: address,
-    ) {
-        // Fixed thresholds (in micro-SUPRA: 1 SUPRA = 1,000,000 micro-SUPRA)
-        let threshold = 600_000_000; // 600 SUPRA
-        let topup_amount = 50_000_000; // 50 SUPRA
+    ) acquires TopUpManager {
+        let deployer_address = signer::address_of(deployer);
+        let current_time = timestamp::now_seconds();
+        
+        // Ensure module is initialized (similar to Counter check)
+        assert!(exists<TopUpManager>(deployer_address), error::not_found(E_NOT_INITIALIZED));
+        
+        let manager = borrow_global_mut<TopUpManager>(deployer_address);
+        
+        // Always emit execution event for tracking
+        event::emit(AutomationExecutedEvent {
+            deployer: deployer_address,
+            target,
+            action_taken: b"automation_started",
+            target_balance: if (coin::is_account_registered<SupraCoin>(target)) coin::balance<SupraCoin>(target) else 0,
+            execution_count: manager.total_topups,
+            timestamp: current_time,
+        });
         
         // Skip if target is not registered for SupraCoin
         if (!coin::is_account_registered<SupraCoin>(target)) {
+            event::emit(AutomationExecutedEvent {
+                deployer: deployer_address,
+                target,
+                action_taken: b"target_not_registered",
+                target_balance: 0,
+                execution_count: manager.total_topups,
+                timestamp: current_time,
+            });
             return
         };
         
-        // Check target wallet balance
         let target_balance = coin::balance<SupraCoin>(target);
         
-        // Only proceed if target balance is below threshold
-        if (target_balance < threshold) {
-            let deployer_address = signer::address_of(deployer);
+        // Check if top-up needed
+        if (target_balance < manager.threshold) {
             let deployer_balance = coin::balance<SupraCoin>(deployer_address);
             
-            // Ensure deployer has sufficient balance
-            assert!(deployer_balance >= topup_amount, E_INSUFFICIENT_BALANCE);
-            
-            // Perform the transfer
-            coin::transfer<SupraCoin>(deployer, target, topup_amount);
-            
-            // Get updated balances for the event
-            let target_balance_after = coin::balance<SupraCoin>(target);
-            let deployer_balance_after = coin::balance<SupraCoin>(deployer_address);
-            
-            // Emit event for tracking
-            event::emit(HighThresholdTopUpEvent {
+            if (deployer_balance >= manager.topup_amount) {
+                // Perform the transfer
+                coin::transfer<SupraCoin>(deployer, target, manager.topup_amount);
+                
+                // Update state
+                manager.total_topups = manager.total_topups + 1;
+                manager.last_topup_time = current_time;
+                
+                let target_balance_after = coin::balance<SupraCoin>(target);
+                
+                // Emit top-up event
+                event::emit(AutoTopUpEvent {
+                    deployer: deployer_address,
+                    target,
+                    amount: manager.topup_amount,
+                    target_balance_before: target_balance,
+                    target_balance_after,
+                    execution_count: manager.total_topups,
+                    timestamp: current_time,
+                });
+                
+                event::emit(AutomationExecutedEvent {
+                    deployer: deployer_address,
+                    target,
+                    action_taken: b"topup_executed",
+                    target_balance: target_balance_after,
+                    execution_count: manager.total_topups,
+                    timestamp: current_time,
+                });
+            } else {
+                event::emit(AutomationExecutedEvent {
+                    deployer: deployer_address,
+                    target,
+                    action_taken: b"insufficient_deployer_balance",
+                    target_balance,
+                    execution_count: manager.total_topups,
+                    timestamp: current_time,
+                });
+            }
+        } else {
+            event::emit(AutomationExecutedEvent {
                 deployer: deployer_address,
                 target,
-                amount_transferred: topup_amount,
-                target_balance_before: target_balance,
-                target_balance_after,
-                threshold_used: threshold,
-                deployer_balance_after,
+                action_taken: b"no_topup_needed",
+                target_balance,
+                execution_count: manager.total_topups,
+                timestamp: current_time,
             });
         }
     }
 
-    /// View function to check if top-up will trigger
+    /// View functions to check state (similar to your Counter example)
     #[view]
-    public fun will_topup_trigger(target: address): bool {
-        if (!coin::is_account_registered<SupraCoin>(target)) {
+    public fun get_topup_stats(deployer: address): (u64, u64, u64, u64) acquires TopUpManager {
+        if (!exists<TopUpManager>(deployer)) {
+            return (0, 0, 0, 0)
+        };
+        let manager = borrow_global<TopUpManager>(deployer);
+        (manager.total_topups, manager.last_topup_time, manager.threshold / 1_000_000, manager.topup_amount / 1_000_000)
+    }
+
+    #[view]
+    public fun is_initialized(deployer: address): bool {
+        exists<TopUpManager>(deployer)
+    }
+
+    #[view]
+    public fun will_topup_trigger(deployer: address, target: address): bool acquires TopUpManager {
+        if (!exists<TopUpManager>(deployer) || !coin::is_account_registered<SupraCoin>(target)) {
             return false
         };
-        let threshold = 600_000_000; // 600 SUPRA in micro-SUPRA
+        let manager = borrow_global<TopUpManager>(deployer);
         let target_balance = coin::balance<SupraCoin>(target);
-        target_balance < threshold
+        target_balance < manager.threshold
     }
 
-    /// View function to get target balance in SUPRA (not micro-SUPRA)
-    #[view]
-    public fun get_target_balance_supra(target: address): u64 {
-        if (!coin::is_account_registered<SupraCoin>(target)) {
-            return 0
-        };
-        let balance_micro = coin::balance<SupraCoin>(target);
-        balance_micro / 1_000_000
-    }
-
-    /// View function to get deployer balance in SUPRA
-    #[view]
-    public fun get_deployer_balance_supra(deployer: address): u64 {
-        if (!coin::is_account_registered<SupraCoin>(deployer)) {
-            return 0
-        };
-        let balance_micro = coin::balance<SupraCoin>(deployer);
-        balance_micro / 1_000_000
-    }
-
-    /// View function to check how much SUPRA is needed to reach threshold
-    #[view]
-    public fun supra_needed_to_reach_threshold(target: address): u64 {
-        if (!coin::is_account_registered<SupraCoin>(target)) {
-            return 600 // Full threshold needed
-        };
-        let threshold = 600_000_000; // 600 SUPRA in micro-SUPRA
-        let target_balance = coin::balance<SupraCoin>(target);
-        
-        if (target_balance >= threshold) {
-            0 // No top-up needed
-        } else {
-            (threshold - target_balance) / 1_000_000
-        }
-    }
-
-    /// View function to check if deployer can afford the top-up
-    #[view]
-    public fun can_deployer_afford_topup(deployer: address): bool {
-        if (!coin::is_account_registered<SupraCoin>(deployer)) {
-            return false
-        };
-        let topup_amount = 50_000_000; // 50 SUPRA in micro-SUPRA
-        let deployer_balance = coin::balance<SupraCoin>(deployer);
-        deployer_balance >= topup_amount
-    }
-
-    /// View function for complete status check
-    #[view]
-    public fun get_automation_status(deployer: address, target: address): (bool, u64, u64, u64) {
-        let will_trigger = will_topup_trigger(target);
-        let target_balance_supra = get_target_balance_supra(target);
-        let deployer_balance_supra = get_deployer_balance_supra(deployer);
-        let supra_needed = supra_needed_to_reach_threshold(target);
-        
-        (will_trigger, target_balance_supra, deployer_balance_supra, supra_needed)
-    }
-
-    #[test_only]
-    use supra_framework::account;
-    use std::debug::print;
-    use std::string::utf8;
-
-    #[test(supra_framework = @supra_framework, deployer = @0x123, target = @0x456)]
-    public entry fun test_high_threshold_automation(
-        supra_framework: &signer,
+    /// Manual function for testing (similar to your manual_increment)
+    public entry fun manual_topup_test(
         deployer: &signer,
-        target: &signer
-    ) {
-        // Setup accounts
-        let deployer_addr = signer::address_of(deployer);
-        let target_addr = signer::address_of(target);
-        
-        account::create_account_for_test(deployer_addr);
-        account::create_account_for_test(target_addr);
-        
-        // Initialize coin for test
-        let (burn_cap, mint_cap) = supra_framework::supra_coin::initialize_for_test(supra_framework);
-        
-        // Register coin stores
-        coin::register<SupraCoin>(deployer);
-        coin::register<SupraCoin>(target);
-        
-        // Give deployer 1000 SUPRA and target 500 SUPRA (simulating real scenario)
-        supra_framework::supra_coin::mint(supra_framework, deployer_addr, 1_000_000_000); // 1000 SUPRA
-        supra_framework::supra_coin::mint(supra_framework, target_addr, 500_000_000);     // 500 SUPRA
-        
-        print(&utf8(b"=== BEFORE AUTOMATION ==="));
-        print(&utf8(b"Target balance (SUPRA):"));
-        print(&get_target_balance_supra(target_addr));
-        print(&utf8(b"Deployer balance (SUPRA):"));
-        print(&get_deployer_balance_supra(deployer_addr));
-        print(&utf8(b"Will trigger?"));
-        print(&will_topup_trigger(target_addr));
-        
-        // Test: target has 500 SUPRA < 600 SUPRA threshold, so top-up should occur
-        high_threshold_topup(deployer, target_addr);
-        
-        print(&utf8(b"=== AFTER AUTOMATION ==="));
-        print(&utf8(b"Target balance (SUPRA):"));
-        print(&get_target_balance_supra(target_addr));
-        print(&utf8(b"Deployer balance (SUPRA):"));
-        print(&get_deployer_balance_supra(deployer_addr));
-        print(&utf8(b"Will trigger again?"));
-        print(&will_topup_trigger(target_addr));
-        
-        // Verify the balances
-        assert!(get_target_balance_supra(target_addr) == 550, 1); // 500 + 50 = 550 SUPRA
-        assert!(get_deployer_balance_supra(deployer_addr) == 950, 2); // 1000 - 50 = 950 SUPRA
-        
-        // Target still has 550 < 600, so automation would trigger again
-        assert!(will_topup_trigger(target_addr), 3); // Should still trigger (550 < 600)
-        
-        // Run automation again to reach above threshold
-        high_threshold_topup(deployer, target_addr);
-        
-        print(&utf8(b"=== AFTER SECOND AUTOMATION ==="));
-        print(&utf8(b"Target balance (SUPRA):"));
-        print(&get_target_balance_supra(target_addr));
-        
-        // Now target should have 600 SUPRA and not trigger anymore
-        assert!(get_target_balance_supra(target_addr) == 600, 4); // 550 + 50 = 600 SUPRA
-        assert!(!will_topup_trigger(target_addr), 5); // Should NOT trigger (600 >= 600)
-        
-        coin::destroy_burn_cap(burn_cap);
-        coin::destroy_mint_cap(mint_cap);
+        target: address,
+    ) acquires TopUpManager {
+        auto_topup_with_state(deployer, target);
     }
 }
