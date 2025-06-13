@@ -1,8 +1,0 @@
-[2025-06-13T08:48:48.920291Z+00:00]  INFO supra_logger: Starting console-logger runtime at localhost:59797. Use `tokio-console http://localhost:59797` to view.
-[2025-06-13T08:48:48.928943Z+00:00]  INFO supra::common::verbose: Log level INFO enabled.
-[2025-06-13T08:54:20.816488Z+00:00]  INFO supra_logger: Starting console-logger runtime at localhost:59089. Use `tokio-console http://localhost:59089` to view.
-[2025-06-13T08:54:20.822138Z+00:00]  INFO supra::common::verbose: Log level INFO enabled.
-[2025-06-13T10:25:20.224183Z+00:00]  INFO supra_logger: Starting console-logger runtime at localhost:55533. Use `tokio-console http://localhost:55533` to view.
-[2025-06-13T10:25:20.229777Z+00:00]  INFO supra::common::verbose: Log level INFO enabled.
-[2025-06-13T10:28:41.504296Z+00:00]  INFO supra_logger: Starting console-logger runtime at localhost:57005. Use `tokio-console http://localhost:57005` to view.
-[2025-06-13T10:28:41.509700Z+00:00]  INFO supra::common::verbose: Log level INFO enabled.

@@ -1,4 +1,4 @@
-module your_address::high_threshold_auto {
+module your_address::autotopup {
     use supra_framework::coin;
     use supra_framework::supra_coin::SupraCoin;
     use supra_framework::event;
@@ -205,12 +205,3 @@ module your_address::high_threshold_auto {
         coin::destroy_mint_cap(mint_cap);
     }
 }
-
-supra move automation register \
-  --task-max-gas-amount 5000 \
-  --task-gas-price-cap 200 \
-  --task-expiry-time-secs 1749814472 \
-  --task-automation-fee-cap 144000000 \
-  --function-id "0x1c5acf62be507c27a7788a661b546224d806246765ff2695efece60194c6df05::high_threshold_auto::high_threshold_topup" \
-  --args address:0x1c5acf62be507c27a7788a661b546224d806246765ff2695efece60194c6df05 \
-  --rpc-url https://rpc-testnet.supra.com
